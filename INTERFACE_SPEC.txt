@@ -1,0 +1,379 @@
+================================================================================
+ LintAgent — Interface Specification
+ Python CLI Developer Tool for Source-Code Rule Checking with LLM-Assisted
+ Diagnosis, an Automated Regression Harness, and Containerized CI
+================================================================================
+ Version : 0.2
+ Owner   : Developer Tooling / DV
+ Status  : Draft
+================================================================================
+
+--------------------------------------------------------------------------------
+1. SCOPE
+--------------------------------------------------------------------------------
+This document specifies the external interfaces of LintAgent: a Python
+command-line developer tool that parses source code, flags rule violations to
+reduce manual review time and developer friction, and uses an LLM backend to
+produce plain-language explanations of failures and suggested corrective edits.
+It also specifies the automated regression harness used to measure injected-
+fault detection rate, the test-coverage gating, and the Docker + GitHub Actions
+CI integration.
+
+Interfaces covered:
+  (A) Command-Line Interface (CLI)
+  (B) Configuration File Interface
+  (C) Rule / Check Plugin Interface
+  (D) LLM Backend Interface
+  (E) Report / Output Schema (JSON + SARIF + text)
+  (F) Python Library API
+  (G) Regression Harness Interface
+  (H) Test-Coverage Interface
+  (I) Container Interface (Docker)
+  (J) CI Interface (GitHub Actions)
+  (K) Exit Codes & Error Model
+
+The tool is language-agnostic via pluggable parsers; the rule set determines
+which languages are meaningfully supported. It is a static analyzer; it does
+not execute the code under analysis.
+
+--------------------------------------------------------------------------------
+2. DEFINITIONS
+--------------------------------------------------------------------------------
+  Violation    A single rule match at a source location (file:line:col).
+  Severity     ERROR | WARNING | INFO.
+  Rule ID      Stable identifier, e.g. LA-STYLE-001.
+  Fault inject A known defect deliberately added to a reference test case to
+               verify detection (used by the regression harness).
+  Suggestion   LLM-produced corrective edit (diff or replacement snippet).
+  Detection    A fault is "detected" when the expected rule fires at/near the
+               injected location.
+
+--------------------------------------------------------------------------------
+3. (A) COMMAND-LINE INTERFACE
+--------------------------------------------------------------------------------
+Synopsis:
+  lintagent [GLOBAL_OPTS] <command> [CMD_OPTS] [PATHS...]
+
+Commands:
+  check       Parse source and emit violations.
+  explain     Run check, then attach LLM explanations/suggestions.
+  rules       List available rules (id, severity, language, description).
+  regress     Run the injected-fault regression harness.
+  version     Print version and exit.
+
+Global options:
+  -c, --config PATH        Config file (default: ./lintagent.toml, then
+                           ~/.config/lintagent/lintagent.toml).
+  -f, --format FMT         text | json | sarif        (default: text)
+  -o, --output PATH        Write report to file (default: stdout).
+  -j, --jobs N             Parallel parse/check workers (default: #CPUs).
+      --lang LANG          Force language (else inferred by extension).
+      --select IDS         Comma list of rule IDs/globs to enable.
+      --ignore IDS         Comma list of rule IDs/globs to disable.
+      --severity LEVEL     Minimum severity to report (info|warning|error).
+      --fail-on LEVEL      Severity that makes `check` exit non-zero
+                           (default: error).
+      --no-llm             Force-disable LLM even for `explain`.
+  -q, --quiet              Suppress non-violation output.
+  -v, --verbose            Repeatable; raise log verbosity.
+      --color WHEN         auto | always | never        (default: auto)
+
+`explain`-specific options:
+      --llm-provider NAME  anthropic | openai | ollama | local  (see §6)
+      --llm-model ID       Model identifier.
+      --max-suggest N      Max violations to send for suggestions (default: 50).
+      --apply              Write LLM suggested edits to disk (guarded; see §13).
+      --dry-run            With --apply, show diffs but do not write.
+
+`regress`-specific options:
+      --suite PATH         Regression suite manifest (default: ./regress.yaml).
+      --cases GLOB         Subset of reference test cases to run.
+      --report PATH        Write regression summary (json).
+      --fail-under PCT     Exit non-zero if detection rate < PCT (default: 80).
+
+PATHS: one or more files or directories (directories recursed; respects
+.gitignore and a configurable include/exclude glob set).
+
+--------------------------------------------------------------------------------
+4. (B) CONFIGURATION FILE INTERFACE  (lintagent.toml)
+--------------------------------------------------------------------------------
+TOML. CLI flags override config; config overrides built-in defaults.
+
+  [project]
+  include      = ["src/**/*.py", "lib/**/*"]
+  exclude      = ["**/vendor/**", "**/*_pb2.py"]
+
+  [check]
+  select       = ["LA-*"]            # globs allowed
+  ignore       = ["LA-STYLE-*"]
+  min_severity = "warning"
+  fail_on      = "error"
+
+  [llm]
+  provider     = "anthropic"
+  model        = "claude-opus-4-8"
+  enabled      = true
+  temperature  = 0.0
+  max_tokens   = 1024
+  timeout_s    = 60
+  redact_paths = true                # strip absolute paths before sending
+  # API key is read from env (see §6), never stored in this file.
+
+  [regress]
+  suite        = "regress.yaml"
+  fail_under   = 80.0
+
+--------------------------------------------------------------------------------
+5. (C) RULE / CHECK PLUGIN INTERFACE
+--------------------------------------------------------------------------------
+Each rule is a Python class discovered via entry point group
+"lintagent.rules" or dropped in a rules/ directory.
+
+  Contract:
+    class Rule:
+        id: str                 # e.g. "LA-STYLE-001"  (stable, unique)
+        name: str               # short human name
+        severity: str           # "ERROR" | "WARNING" | "INFO"
+        languages: list[str]    # languages this rule applies to
+        description: str        # one-line summary
+        def check(self, ast, ctx) -> Iterable[Violation]: ...
+
+    ctx provides: source map, parsed tree, file metadata, config knobs.
+    A Rule MUST be side-effect free and deterministic.
+
+Baseline rule families (initial set):
+  LA-STYLE-*   Naming, formatting, line length, magic numbers.
+  LA-CORRECT-* Likely bugs: unused/undefined names, unreachable code,
+               shadowing, suspicious comparisons.
+  LA-API-*     Misuse of APIs, deprecated calls, unsafe defaults.
+  LA-SEC-*     Common security smells (hardcoded secrets, injection sinks).
+  LA-COMPLEX-* Complexity/maintainability (function length, nesting depth).
+
+--------------------------------------------------------------------------------
+6. (D) LLM BACKEND INTERFACE
+--------------------------------------------------------------------------------
+Pluggable provider abstraction. A provider implements:
+
+    class LLMProvider:
+        def explain(self, violation: Violation, snippet: str) -> Explanation
+        def suggest(self, violation: Violation, snippet: str) -> Suggestion
+
+Built-in providers:
+  anthropic   Default. Model default: claude-opus-4-8.
+              Key from env ANTHROPIC_API_KEY.
+  openai      Key from env OPENAI_API_KEY.
+  ollama      Local HTTP endpoint (OLLAMA_HOST, default 127.0.0.1:11434).
+  local       Deterministic template-based fallback (no network); used in CI
+              and offline runs.
+
+Request contract (provider-agnostic, JSON sent to backend):
+  {
+    "rule_id":   "LA-CORRECT-004",
+    "severity":  "WARNING",
+    "message":   "Variable 'cfg' used before assignment",
+    "language":  "python",
+    "snippet":   "<N lines of code around the violation>",
+    "ask":       "explain" | "suggest"
+  }
+
+Response contract consumed by LintAgent:
+  Explanation:
+    { "plain_text": "...", "root_cause": "...", "confidence": 0.0-1.0 }
+  Suggestion:
+    { "rationale": "...",
+      "edit": { "type": "diff"|"replace",
+                "file": "src/foo.py", "start_line": N, "end_line": M,
+                "new_text": "..." },
+      "confidence": 0.0-1.0 }
+
+Guarantees / constraints:
+  - temperature defaults to 0.0 for reproducibility.
+  - If redact_paths=true, absolute paths are stripped before any network call.
+  - LLM output is ADVISORY. Suggestions are never auto-applied unless --apply.
+  - On provider error/timeout the violation is still reported (no LLM text).
+
+--------------------------------------------------------------------------------
+7. (E) REPORT / OUTPUT SCHEMA
+--------------------------------------------------------------------------------
+7.1 Text (human): one violation per block:
+    <severity> <rule_id> file:line:col  message
+        | <source line>
+        | ^
+        explanation: <llm plain_text>        (explain mode only)
+        suggestion : <short summary>          (explain mode only)
+
+7.2 JSON (machine):
+  {
+    "tool":    { "name": "lintagent", "version": "0.2" },
+    "summary": { "files": N, "violations": N,
+                 "errors": N, "warnings": N, "infos": N },
+    "violations": [
+      {
+        "rule_id":  "LA-CORRECT-004",
+        "severity": "WARNING",
+        "message":  "Variable 'cfg' used before assignment",
+        "location": { "file": "src/foo.py", "line": 42, "col": 9,
+                      "end_line": 42, "end_col": 20 },
+        "snippet":  "...",
+        "explanation": { "plain_text": "...", "confidence": 0.9 },
+        "suggestion":  { "rationale": "...", "edit": { ... },
+                         "confidence": 0.8 }
+      }
+    ]
+  }
+
+7.3 SARIF 2.1.0: standard schema for CI/code-scanning integration. Rule IDs
+    map to SARIF reportingDescriptor.id; severities map error/warning/note.
+    This is the format uploaded by the GitHub Actions workflow (§11).
+
+--------------------------------------------------------------------------------
+8. (F) PYTHON LIBRARY API
+--------------------------------------------------------------------------------
+  from lintagent import Linter, Config
+
+  cfg     = Config.load("lintagent.toml")       # or Config(**kwargs)
+  linter  = Linter(cfg)
+  report  = linter.check(["src/"])              # -> Report
+  report  = linter.explain(report)             # attach LLM text (optional)
+
+  report.violations      -> list[Violation]
+  report.to_json()       -> str
+  report.to_sarif()      -> str
+  report.counts          -> {"error": n, "warning": n, "info": n}
+
+Stability: `Linter`, `Config`, `Violation`, `Report` are the public, semver-
+governed surface. Everything else is internal.
+
+--------------------------------------------------------------------------------
+9. (G) REGRESSION HARNESS INTERFACE
+--------------------------------------------------------------------------------
+Purpose: measure injected-fault detection rate across reference test cases.
+Target metric (from project goal): >= 80% detection across the 6 reference
+test cases.
+
+Suite manifest (regress.yaml):
+  cases:
+    - name: parser_basic
+      golden: cases/parser_basic/src        # clean source (should be ~0 ERRORs)
+      faults:
+        - id: pb-shadow-01
+          patch: faults/parser_basic/shadow01.patch
+          expect_rule: LA-CORRECT-002         # rule expected to catch it
+        - id: pb-magic-02
+          patch: faults/parser_basic/magic02.patch
+          expect_rule: LA-STYLE-007
+    - name: api_client
+      ...
+
+Procedure per fault:
+  1. Apply patch to a clean copy of the test case.
+  2. Run `lintagent check` on the mutated source.
+  3. DETECTED if a violation with rule_id == expect_rule (or in expect_rule
+     set) is produced at/near the injected location.
+  4. Revert.
+
+Outputs (regress report json):
+  {
+    "cases": 6,
+    "faults_total": N,
+    "faults_detected": M,
+    "detection_rate": M / N * 100,
+    "false_positives_on_golden": K,
+    "per_case":  [ { "name": "...", "total": n, "detected": m,
+                     "rate": ... } ],
+    "per_fault": [ { "id": "...", "expect_rule": "...",
+                     "detected": true|false } ]
+  }
+
+Pass/fail: exit non-zero if detection_rate < fail_under (default 80.0)
+or if false_positives_on_golden > golden_fp_budget (default 0).
+
+--------------------------------------------------------------------------------
+10. (H) TEST-COVERAGE INTERFACE
+--------------------------------------------------------------------------------
+Purpose: automated test coverage to catch regressions in the tool itself
+(distinct from the injected-fault detection rate of §9, which measures the
+tool's effectiveness on target source).
+
+  - Unit + integration tests run via `pytest`.
+  - Coverage measured with `coverage`/`pytest-cov`.
+  - Coverage report formats: term-missing (console) and XML (coverage.xml)
+    for CI upload.
+  - Gate: a minimum line-coverage threshold (default 85%) enforced via
+    `pytest --cov=lintagent --cov-fail-under=85`. Builds fail below it.
+  - The regression harness (§9) runs as part of the same test invocation so a
+    drop in detection rate also fails CI.
+
+--------------------------------------------------------------------------------
+11. (I) CONTAINER INTERFACE (DOCKER)
+--------------------------------------------------------------------------------
+Image: ghcr.io/<org>/lintagent:<tag>  (tags: latest, vX.Y.Z, sha-<commit>)
+
+Dockerfile contract:
+  - Multi-stage build: builder (installs deps, runs tests) -> slim runtime.
+  - Base: python:3.12-slim. Non-root user "app".
+  - ENTRYPOINT ["lintagent"]; CMD ["--help"].
+  - WORKDIR /work; user mounts source read-only at /work.
+
+Runtime contract:
+  docker run --rm -v "$PWD":/work:ro \
+    -e ANTHROPIC_API_KEY \
+    ghcr.io/<org>/lintagent:latest check src/
+
+  - Secrets passed via -e env only; never baked into the image.
+  - Network is only required for remote LLM providers; default `check`/`regress`
+    runs offline. CI uses provider=local for hermetic builds.
+  - Exit code of the container == exit code of the CLI (§12).
+
+--------------------------------------------------------------------------------
+12. (J) CI INTERFACE (GITHUB ACTIONS)
+--------------------------------------------------------------------------------
+Workflow: .github/workflows/ci.yml  — triggers: on: [push, pull_request].
+
+Jobs (run on every push):
+  test:
+    - Checkout, set up Python, install dev deps.
+    - Lint the tool's own code + run `pytest` with coverage gate (§10).
+    - Run the regression suite: `lintagent regress --fail-under 80`
+      (provider=local for hermetic, offline execution).
+    - Upload coverage.xml and the regression report json as artifacts.
+  build:
+    - Build the Docker image (§11); run a smoke `lintagent version` in it.
+    - On tag push (v*), push image to GHCR.
+  scan (optional):
+    - Run `lintagent check --format sarif -o results.sarif` on the repo and
+      upload via github/codeql-action/upload-sarif for code scanning.
+
+Required status checks: `test` and `build` must pass to merge. The regression
+job failing (detection_rate < 80% or new false positives on golden) blocks the
+merge, satisfying "catch regressions" on every push.
+
+--------------------------------------------------------------------------------
+13. (K) EXIT CODES & ERROR MODEL
+--------------------------------------------------------------------------------
+  0   Success: ran cleanly; for `check`, no violations >= --fail-on level.
+  1   Violations present at or above the --fail-on severity.
+  2   Usage / argument error.
+  3   Parse error in source (could not build AST).
+  4   Config error (invalid/missing config).
+  5   LLM backend error when LLM was required (not for advisory failures).
+  6   Regression threshold not met (detection_rate < fail_under, or golden
+      false positives over budget).
+  >=64 Internal error.
+
+Logging: structured logs to stderr; report payload to stdout/--output. Findings
+and logs are never interleaved on the same stream in json/sarif modes.
+
+--------------------------------------------------------------------------------
+14. SAFETY & DETERMINISM REQUIREMENTS
+--------------------------------------------------------------------------------
+  - Check results MUST be deterministic given identical inputs and config.
+  - --apply MUST refuse to run on a dirty git tree unless --force is given,
+    and MUST write a backup (.lintagent.bak) or rely on VCS.
+  - No source is sent to a remote LLM unless an explicit network provider is
+    selected; `local` provider keeps everything offline (used by CI).
+  - Secrets (API keys) come only from environment, never config/report/image.
+
+================================================================================
+ END OF SPECIFICATION
+================================================================================
