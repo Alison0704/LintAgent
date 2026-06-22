@@ -1,0 +1,39 @@
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# MkDocs
+site/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+
+# Environment / secrets
+.env
+.env.local
+
+# Simulation / EDA
+*.vcd
+*.fst
+*.wlf
+*.jou
+*.str
+*.rpt
+
+# Temporary files
+tmp/
+temp/

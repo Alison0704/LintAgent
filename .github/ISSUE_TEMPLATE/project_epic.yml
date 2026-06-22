@@ -1,0 +1,99 @@
+name: Project / Epic
+description: Create a larger project or subproject tracked in the Master GitHub Project.
+title: "[Project]: "
+labels: ["master-track", "type:epic"]
+body:
+  - type: input
+    id: goal
+    attributes:
+      label: Main goal
+      description: What should this project achieve?
+      placeholder: "Example: Build a reusable verification environment."
+    validations:
+      required: true
+
+  - type: textarea
+    id: final_output
+    attributes:
+      label: Final output
+      description: What should exist when this project is done?
+      placeholder: |
+        Example:
+        - Working source code
+        - Tests or simulation
+        - README instructions
+        - Documentation site
+        - Results or screenshots
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - System Design
+        - Game Development
+        - Layout Design
+        - RTL and Verification
+        - AI and ML
+        - Web Development
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - urgent / job-critical
+        - P1 - important
+        - P2 - useful
+        - P3 - someday
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Starting phase
+      options:
+        - Idea
+        - Spec
+        - Build
+        - Test
+        - Docs
+        - Released
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Initial tasks
+      description: These can later become sub-issues.
+      placeholder: |
+        - [ ] Write spec
+        - [ ] Create project structure
+        - [ ] Build first version
+        - [ ] Add tests
+        - [ ] Update README
+        - [ ] Update MkDocs documentation
+        - [ ] Add results
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of Done
+      description: What must be true before this moves to Done?
+      placeholder: |
+        - [ ] Work is complete
+        - [ ] Tests or checks pass
+        - [ ] README is updated
+        - [ ] MkDocs documentation is updated if needed
+        - [ ] Results are documented
+        - [ ] Project is portfolio-ready or clearly marked as not portfolio-ready
+    validations:
+      required: true

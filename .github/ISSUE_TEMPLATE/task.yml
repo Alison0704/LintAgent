@@ -1,0 +1,74 @@
+name: Task
+description: Create a smaller task under a project or epic.
+title: "[Task]: "
+labels: ["type:task"]
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Parent project / epic
+      description: Link the parent issue if this belongs to a larger project.
+      placeholder: "#12"
+    validations:
+      required: false
+
+  - type: textarea
+    id: task
+    attributes:
+      label: Task
+      description: What needs to be done?
+      placeholder: "Example: Add MkDocs setup page."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - System Design
+        - Game Development
+        - Layout Design
+        - RTL and Verification
+        - AI and ML
+        - Web Development
+    validations:
+      required: true
+
+  - type: dropdown
+    id: task_type
+    attributes:
+      label: Task type
+      options:
+        - Code
+        - Test
+        - Documentation
+        - Debug
+        - Cleanup
+        - Research
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      placeholder: |
+        - [ ] Create or edit file
+        - [ ] Run command
+        - [ ] Check output
+        - [ ] Update README or docs if needed
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      placeholder: |
+        Example:
+        - Command runs without error
+        - Output is generated
+        - README or docs include usage command
+    validations:
+      required: true

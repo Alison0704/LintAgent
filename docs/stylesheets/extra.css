@@ -1,0 +1,100 @@
+/* =========================================================
+   Blue + Orange MkDocs Material Theme Fixes
+   ========================================================= */
+
+/* Light mode colors */
+:root {
+  --md-primary-fg-color: #002366;
+  --md-primary-fg-color--light: #1d4ed8;
+  --md-primary-fg-color--dark: #001845;
+
+  --md-accent-fg-color: #f97316;
+  --md-typeset-a-color: #d95f02;
+}
+
+/* Dark mode colors */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #002366;
+  --md-primary-fg-color--light: #2563eb;
+  --md-primary-fg-color--dark: #001233;
+
+  --md-accent-fg-color: #fb923c;
+  --md-typeset-a-color: #fb923c;
+}
+
+/* Main content links */
+.md-typeset a {
+  color: var(--md-typeset-a-color);
+}
+
+.md-typeset a:hover {
+  color: #ffb86b;
+}
+
+/* Fix active navigation link visibility */
+.md-nav__link--active {
+  color: #f97316 !important;
+  font-weight: 700;
+}
+
+.md-nav__link:hover {
+  color: #f97316 !important;
+}
+
+/* Dark mode active navigation link */
+[data-md-color-scheme="slate"] .md-nav__link--active {
+  color: #fb923c !important;
+  font-weight: 700;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link:hover {
+  color: #fb923c !important;
+}
+
+/* Fix side navigation title color in dark mode */
+[data-md-color-scheme="slate"] .md-nav__title {
+  color: #e5e7eb !important;
+}
+
+/* Fix normal nav text in dark mode */
+[data-md-color-scheme="slate"] .md-nav__link {
+  color: #d1d5db;
+}
+
+/* Fix selected/highlighted text */
+::selection {
+  background-color: #f97316;
+  color: #ffffff;
+}
+
+::-moz-selection {
+  background-color: #f97316;
+  color: #ffffff;
+}
+
+[data-md-color-scheme="slate"] ::selection {
+  background-color: #fb923c;
+  color: #111827;
+}
+
+[data-md-color-scheme="slate"] ::-moz-selection {
+  background-color: #fb923c;
+  color: #111827;
+}
+
+/* Buttons */
+.md-button {
+  border-radius: 8px;
+}
+
+.md-button--primary {
+  background-color: #002366;
+  border-color: #002366;
+  color: #ffffff !important;
+}
+
+.md-button--primary:hover {
+  background-color: #f97316;
+  border-color: #f97316;
+  color: #ffffff !important;
+}
